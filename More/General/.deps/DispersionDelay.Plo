@@ -1,0 +1,8 @@
+DispersionDelay.lo: DispersionDelay.C /usr/include/stdc-predef.h \
+ Pulsar/DispersionDelay.h ../../local_include/Physical.h
+
+/usr/include/stdc-predef.h:
+
+Pulsar/DispersionDelay.h:
+
+../../local_include/Physical.h:

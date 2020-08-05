@@ -1,0 +1,98 @@
+#! /bin/sh
+
+# Management/psrchive.  Generated from psrchive.in by configure.
+
+usage()
+{
+cat <<EOF
+
+Usage: psrchive [OPTION]
+
+Known values for OPTION are:
+
+  --prefix              installation directory
+  --libs                library linking information
+  --cppflags            pre-processor flags
+  --cflags              pre-processor and compiler flags
+  --html                web page layout directory
+  --aclocal             autoconf macro directory
+  --help                this help message
+  --version             version information
+  --pgplot-libs         PGPLOT linking information
+  --qt-libs             Qt linking information
+
+EOF
+
+exit $1
+}
+
+if test $# -eq 0; then
+    usage 1
+fi
+
+prefix=/aux/pc20162a/kliu/Soft/
+exec_prefix=${prefix}
+datarootdir=${prefix}/share
+
+while test $# -gt 0; do
+
+    case "$1" in
+    -*=*) optarg=`echo "$1" | sed 's/[-_a-zA-Z0-9]*=//'` ;;
+    *) optarg= ;;
+    esac
+
+    case "$1" in
+
+    --prefix)
+        echo /aux/pc20162a/kliu/Soft/
+        ;;
+
+    --version)
+        echo PSRCHIVE 2012-12+ 'PSRCHIVEGITHASH'
+        exit 0
+        ;;
+
+    --help)
+        usage 0
+        ;;
+
+    --cppflags)
+        echo -I${prefix}/include
+        ;;
+
+    --cflags)
+        echo -I${prefix}/include -pthread
+        ;;
+
+    --ldflags | --libs)
+        echo -L${exec_prefix}/lib -lpsrmore -lpsrbase -lpsrutil \
+             -L/aux/pc20162a/kliu/Soft//lib -L/usr/local/lib  -L/aux/pc20162a/kliu/Soft//lib -lfftw3f    -L/aux/pc20162a/kliu/Soft//lib -lcfitsio -lpthread -lm   -L/aux/pc20162a/kliu/Soft/tempo2//lib -ltempo2pred -lm \
+             -L/usr/lib/x86_64-linux-gnu -lgsl -lgslcblas -lm -pthread   -L/usr/lib/gcc/x86_64-linux-gnu/7 -L/usr/lib/gcc/x86_64-linux-gnu/7/../../../x86_64-linux-gnu -L/usr/lib/gcc/x86_64-linux-gnu/7/../../../../lib -L/lib/x86_64-linux-gnu -L/lib/../lib -L/usr/lib/x86_64-linux-gnu -L/usr/lib/../lib -L/usr/lib/gcc/x86_64-linux-gnu/7/../../.. -lgfortran -lm -lquadmath
+        ;;
+
+    --pgplot-libs)
+        echo -L${exec_prefix}/lib -lpsrplot -I/homes/ridolfi/SOFT_numerix1/pgplot -L/homes/ridolfi/SOFT_numerix1/pgplot -lcpgplot -lpgplot  -L/usr/lib/gcc/x86_64-linux-gnu/7 -L/usr/lib/gcc/x86_64-linux-gnu/7/../../../x86_64-linux-gnu -L/usr/lib/gcc/x86_64-linux-gnu/7/../../../../lib -L/lib/x86_64-linux-gnu -L/lib/../lib -L/usr/lib/x86_64-linux-gnu -L/usr/lib/../lib -L/usr/lib/gcc/x86_64-linux-gnu/7/../../.. -lgfortran -lm -lquadmath   -lX11
+        ;;
+
+    --qt-libs)
+        echo 
+        ;;
+
+    --aclocal)
+        echo ${datarootdir}/aclocal
+        ;;
+
+    --html)
+        echo ${datarootdir}/html
+        ;;
+
+    *)
+        usage
+        exit 1
+        ;;
+    esac
+    shift
+done
+
+exit 0
+

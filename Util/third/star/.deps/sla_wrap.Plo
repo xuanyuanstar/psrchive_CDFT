@@ -1,0 +1,5 @@
+sla_wrap.lo: sla_wrap.c /usr/include/stdc-predef.h ../../../config.h
+
+/usr/include/stdc-predef.h:
+
+../../../config.h:

@@ -1,0 +1,7 @@
+ephio_def.lo: ephio_def.c /usr/include/stdc-predef.h ephio.h ephio_func.h
+
+/usr/include/stdc-predef.h:
+
+ephio.h:
+
+ephio_func.h:

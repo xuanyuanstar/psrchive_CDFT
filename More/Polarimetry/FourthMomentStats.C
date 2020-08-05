@@ -1,0 +1,422 @@
+/***************************************************************************
+ *
+ *   Copyright (C) 2009 by Willem van Straten
+ *   Licensed under the Academic Free License version 2.1
+ *
+ ***************************************************************************/
+
+#include "Pulsar/FourthMomentStats.h"
+#include "Pulsar/PolnProfile.h"
+#include "Pulsar/StokesCovariance.h"
+#include "Pulsar/ModeSeparation.h"
+
+#include "Pauli.h"
+#include "Jacobi.h"
+#include "Minkowski.h"
+
+using namespace std;
+
+// #define _DEBUG
+
+//! Default constructor
+Pulsar::FourthMomentStats::FourthMomentStats (const PolnProfile* _profile)
+  : PolnProfileStats (_profile)
+{
+  if (profile)
+    covariance = profile->get_covariance();
+}
+
+//! Destructor
+Pulsar::FourthMomentStats::~FourthMomentStats()
+{
+}
+
+//! Set the FourthMoment from which statistics will be derived
+void Pulsar::FourthMomentStats::set_profile (const PolnProfile* _profile)
+{
+  PolnProfileStats::set_profile (_profile);
+
+  if (profile)
+    covariance = profile->get_covariance();
+}
+
+void sort (Vector<3,double>& v)
+{
+  if (v[0] < v[1])
+    std::swap (v[0], v[1]);
+  if (v[1] < v[2])
+    std::swap (v[1], v[2]);
+  if (v[0] < v[1])
+    std::swap (v[0], v[1]);
+}
+
+Reference::To<Pulsar::Profile> Pulsar::FourthMomentStats::get_modulation_index()
+{
+  const unsigned nbin = covariance->get_nbin();
+
+  Reference::To<Profile> result = covariance->get_Profile(0)->clone();
+
+  PhaseWeight* baseline = stats->get_baseline ();
+  double off_pulse_variance;
+  baseline->stats (result, &off_pulse_variance);
+
+  const Profile* intensity = profile->get_Profile(0);
+  double off_pulse_mean, var;
+  baseline->stats (intensity, &off_pulse_mean, &var);
+
+  double dof = off_pulse_mean * off_pulse_mean / off_pulse_variance;
+  cerr << "dof=" << dof << endl;
+  
+  const float* I = intensity->get_amps();
+
+  double duration = 1893.42803456;
+  double period = 0.0893800997072938;
+
+  double npulse = duration / period;
+
+  double bandwidth = 400e6 / 512;
+  double bin_samples = period * bandwidth / nbin;
+
+  cerr << "bin_samples*2=" << bin_samples*2 << endl;
+  cerr << "npulse=" << npulse << endl;
+  cerr << "dof/npulse=" << dof / npulse << endl;
+ 
+
+  double weight = 1.0;
+
+  double ratio = var / off_pulse_variance;
+  if (ratio > 4 || ratio < 0.25)
+  {
+    // this is approx. the normalization factor that psr4th should have applied
+    cerr << "correcting psr4th bug" << endl;
+    weight = npulse / intensity->get_weight();
+  }
+
+  cerr << "mean=" << off_pulse_mean << " var=" << var 
+       << " moment=" << off_pulse_variance
+       << " normalized moment=" << off_pulse_variance / weight << endl;
+
+  cerr << "missing factor=" << var / (off_pulse_variance / weight) << endl;
+
+  dof = bin_samples*2;
+
+  cerr << "applied dof=" << dof << endl;
+
+  cerr << "predicted variance=" << sqrt(off_pulse_mean*off_pulse_mean/dof) << endl
+       << "measured variance=" << sqrt(off_pulse_variance*npulse/weight) << endl;
+
+  //return result;
+
+  float* M = result->get_amps();
+
+  for (unsigned i=0; i<nbin; i++)
+  {
+    float Ival = I[i] - off_pulse_mean;
+    double Isq = Ival * Ival;
+
+    if (Isq < 100 * var)
+      M[i] = 0;
+    else
+    {
+      Stokes<double> S = profile->get_Stokes(i);
+
+      double bias = normsq(S) / dof;
+
+      M[i] = (M[i]*npulse/weight - bias) / Isq;
+    }
+
+ 
+  }
+
+  return result;
+}
+
+
+void Pulsar::FourthMomentStats::eigen (PolnProfile* v1,
+				       PolnProfile* v2,
+				       PolnProfile* v3)
+{
+  if (!covariance)
+    throw Error (InvalidState, "Pulsar::FourthMomentStats::eigen",
+		 "covariance not set");
+
+  PhaseWeight* baseline = stats->get_baseline ();
+  Reference::To<StokesCovariance> clone = covariance->clone();
+
+  vector<double> baseline_mean_moment (StokesCovariance::nmoment);
+
+  for (unsigned imoment=0; imoment < StokesCovariance::nmoment; imoment++)
+  {
+    Profile* profile = clone->get_Profile(imoment);
+    baseline->set_Profile( profile );
+
+    double mean, variance;
+    baseline->stats (profile, &mean, &variance);
+    
+    baseline_mean_moment[imoment] = mean;
+
+    profile->offset( -mean );
+  }
+  covariance = clone;
+
+  const unsigned npol = 4;
+  unsigned diagonal [npol] = { 0, 4, 7, 9 };
+
+  Vector<npol,double> baseline_mean_pol;
+  for (unsigned ipol=0; ipol < npol; ipol++)
+  {
+    const Profile* prof = profile->get_Profile(ipol);
+    baseline->set_Profile( prof );
+
+    double mean, variance;
+    baseline->stats (prof, &mean, &variance);
+    
+    baseline_mean_pol[ipol] = mean;
+
+    cout << "baseline mean=" << mean << " var=" << variance << " vs " 
+	 << baseline_mean_moment[ diagonal[ipol] ] << endl;
+  }
+
+  Matrix<4,4,double> expected = Minkowski::outer(baseline_mean_pol,baseline_mean_pol);
+
+  unsigned k=0;
+  for (unsigned i=0; i<4; i++)
+    for (unsigned j=i; j<4; j++)
+      {
+	cerr << "expected[" << i << "][" << j << "]=" << expected[i][j] << endl;
+	cerr << "dof=" << expected[i][j] / baseline_mean_moment[k] << endl;
+	k++;
+      }
+
+  PolnProfile* v[3] = { v1, v2, v3 };
+
+  const unsigned nbin = profile->get_nbin();
+
+  eigen_value.resize(3);
+  regression_coefficient.resize(3);
+
+  for (unsigned i=0; i<3; i++)
+  {
+    if (v[i])
+      v[i]->resize( nbin );
+
+    eigen_value[i] = new Profile (nbin);
+    regression_coefficient[i] = new Profile (nbin);
+  }
+
+  for (unsigned ibin=0; ibin < nbin; ibin++)
+  {
+    Matrix<4,4,double> C = covariance->get_covariance (ibin);
+
+    Stokes<double> mean = profile->get_Stokes(ibin);
+    double P = mean.abs_vect()/mean.get_scalar();
+    double Pell = 0;
+
+    if (P < 1 && P > 0)
+      Pell = sqrt((1+P*P)/(1-P*P));
+      
+    Stokes<double> result;
+
+    // get the eigen vectors of the coherency matrix
+    Jones<double> rotation = convert( ::eigen( natural(mean) ) );
+    Matrix<4,4,double> R = Mueller( rotation );
+
+    // C = R * C * herm(R);
+
+    double Ivar;
+    Vector<3,double> Icovar;
+    Matrix<3,3,double> pcovar;
+
+    // extract the 3x3 covariance matrix of the polarization vector
+    partition (C, Ivar, Icovar, pcovar);
+
+    Vector<3,double> regression = Icovar; //inv(pcovar) * Icovar;
+
+    Matrix<3,3,double> peigen;
+    Vector<3,double> pvar;
+
+    // compute the eigen vector matrix (a 3D rotation)
+    Jacobi (pcovar, peigen, pvar);
+
+    sort (pvar);
+
+    for (unsigned i=0; i < 3; i++)
+    {
+      eigen_value[i]->get_amps()[ibin] = pvar[i];
+      regression_coefficient[i]->get_amps()[ibin] = regression[i];
+    }
+
+    double Rvar = regression * Icovar;
+    regression /= norm(regression);
+
+
+    unsigned imax = 0;
+    unsigned imin = 0;
+    for (unsigned i=1; i<3; i++)
+      if (pvar[i] > pvar[imax])
+	imax = i;
+      else if (pvar[i] < pvar[imin])
+	imin = i;
+
+    double Cell = 0;
+    double CP = 0;
+    if (pvar[imax] > 0 && pvar[imin] > 0)
+    {
+      Cell = pvar[imax]/pvar[imin];
+      if (Cell > 1)
+	CP = sqrt( (Cell-1)/(Cell+1) );
+      Cell = sqrt( Cell );
+    }
+
+    Matrix<4,4,double> rotate;
+    Vector<3,double> zero;
+
+    // convert to a 4D rotation
+    compose (rotate, 1.0, zero, peigen);
+
+    C = rotate * C * herm(rotate);
+
+    Vector<3,double> pmean = mean.get_vector();
+
+    double cos_theta = regression * pmean / norm(pmean);
+#if 0
+    double theta = acos (cos_theta);
+
+    if (theta > M_PI/2)
+    {
+      regression *= -1;
+      theta = M_PI - theta;
+    }
+#endif
+
+#if 0
+    cout << ibin << " " << theta*180/M_PI 
+	 << " " << Pell << " " << Cell
+	 << " " << P << " " << CP << endl;
+//#else
+    cout << ibin;
+    for (unsigned i=0; i<3; i++)
+      cout << " " << sqrt(pvar[i])/mean.get_scalar();
+    cout << endl;
+#endif
+
+    for (unsigned i=0; i<4; i++)
+      result[i] = C[0][i];
+
+    // v[0]->set_Stokes (ibin, result);
+
+    if (CP==0.0)
+      regression = 0;
+
+    Stokes<double> Rstokes (Ivar, Rvar*regression);
+
+    // v[0]->set_Stokes (ibin, R*Rstokes);
+
+    //v[0]->set_Stokes (ibin, Stokes<double>(Ivar, peigen[imax]));
+    //v[0]->set_Stokes (ibin, Stokes<double>(Ivar, peigen[imax]*pvar[imax]));
+
+
+  }
+}
+
+
+
+//! Get the Stokes parameters of the specified phase bin
+Matrix< 4,4,Estimate<double> >
+Pulsar::FourthMomentStats::get_covariance (unsigned ibin) const try
+{
+  Matrix< 4,4,Estimate<double> > result = covariance->get_covariance (ibin);
+
+  unsigned imoment = 0;
+  for (unsigned ipol=0; ipol < 4; ipol++)
+    for (unsigned jpol=ipol; jpol < 4; jpol++)
+    {
+      double var = get_moment_variance(imoment).get_value(); imoment ++;
+
+      result[ipol][jpol].set_variance( var );
+      result[jpol][ipol].set_variance( var );
+    }
+
+  return result;
+}
+ catch (Error& error)
+   {
+     throw error += "Pulsar::FourthMomentStats::get_covariance";
+   }
+
+
+Estimate<double>
+Pulsar::FourthMomentStats::get_moment_variance (unsigned imom) const try
+{
+  if (imom >= StokesCovariance::nmoment)
+    throw Error (InvalidParam,
+		 "Pulsar::FourthMomentStats::get_moment_variance",
+		 "imoment=%u >= nmoment=%u",
+		 imom, StokesCovariance::nmoment);
+
+  moment_variance.resize( StokesCovariance::nmoment );
+
+  if (moment_variance[imom].get_value() == 0)
+  {
+    stats->set_profile( covariance->get_Profile(imom) );
+    moment_variance[imom] = stats->get_baseline_variance();
+#ifdef _DEBUG
+    cerr << "Pulsar::FourthMomentStats::get_moment_variance imom="
+         << imom << " var=" << moment_variance[imom] << endl;
+#endif
+  }
+  return moment_variance[imom];
+}
+ catch (Error& error)
+   {
+     throw error += "Pulsar::FourthMomentStats::get_moment_variance";
+   }
+
+void Pulsar::FourthMomentStats::separate (PolnProfile& modeA,
+					  PolnProfile& modeB)
+{
+  if (!covariance)
+    throw Error (InvalidState, "Pulsar::FourthMomentStats::separate",
+		 "covariance not set");
+
+  PhaseWeight* baseline = stats->get_baseline ();
+  Reference::To<StokesCovariance> clone = covariance->clone();
+  for (unsigned imoment=0; imoment < StokesCovariance::nmoment; imoment++)
+  {
+    baseline->set_Profile( clone->get_Profile(imoment) );
+    cerr << "covar[" << imoment << "]=" << baseline->get_avg() << endl;
+    clone->get_Profile(imoment)->offset( -baseline->get_avg() );
+  }
+
+  covariance = clone;
+
+  const unsigned nbin = profile->get_nbin();
+
+  modeA.resize( nbin );
+  modeB.resize( nbin );
+
+  ModeSeparation modes;
+
+  float threshold = 10.0;
+
+  for (unsigned ibin=0; ibin < nbin; ibin++)
+  {
+    Stokes< Estimate<double> > stokes = get_stokes(ibin);
+    if (stokes[0].get_value() < threshold * stokes[0].get_error())
+      continue;
+
+    cerr << "Pulsar::FourthMomentStats::separate ibin=" << ibin << endl
+	 << "stokes=" << stokes << endl;
+
+    modes.set_mean ( stokes );
+    modes.set_covariance ( get_covariance (ibin) );
+
+    modes.solve ();
+
+    cerr << "modeA=" << coherency(modes.get_modeA()->evaluate()) << endl;
+    cerr << "modeB=" << coherency(modes.get_modeB()->evaluate()) << endl;
+    cerr << "modeC=" << coherency(modes.get_modeC()->evaluate()) << endl;
+    cerr << "correlation=" << modes.get_correlation()->evaluate() << endl;
+    cerr << "mean=" << coherency(modes.get_mean()->evaluate()) << endl;
+  }
+}
